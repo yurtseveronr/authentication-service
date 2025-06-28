@@ -18,16 +18,21 @@ jobs:
         ln -sf /usr/bin/python3 /usr/bin/python
         ln -sf /usr/bin/pip3 /usr/bin/pip
         
-        # Install Java 17
-        apt-get install -y openjdk-17-jdk
-        update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-17-openjdk-amd64/bin/java 1
-        update-alternatives --set java /usr/lib/jvm/java-17-openjdk-amd64/bin/java
-        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-        echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
-        echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> $GITHUB_PATH
+        # Remove all existing Java versions
+        apt-get remove -y --purge openjdk-* || true
+        apt-get autoremove -y || true
         
-        echo "Java version:"
+        # Install Java 21 (SonarQube server ile aynı)
+        apt-get install -y openjdk-21-jdk
+        
+        # Set Java 21
+        export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+        echo "JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64" >> $GITHUB_ENV
+        echo "/usr/lib/jvm/java-21-openjdk-amd64/bin" >> $GITHUB_PATH
+        
+        # Verify Java
         java -version
+        which java
     
     - name: Unit Tests & Coverage
       run: |
@@ -39,34 +44,35 @@ jobs:
           --cov-fail-under=50 \
           -v
     
-    - name: SonarQube Analysis
+    - name: SonarQube Static Code Analysis
       run: |
         cd codebase
         
-        # Set Java 17
-        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-        export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+        # Ensure Java 21 (SonarQube server ile aynı)
+        export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+        export PATH=/usr/lib/jvm/java-21-openjdk-amd64/bin:$PATH
         
-        echo "Using Java version:"
+        echo "Java verification:"
         java -version
+        echo "JAVA_HOME: $JAVA_HOME"
         
-        # Download SonarQube Scanner
-        wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip
-        unzip -q sonar-scanner-cli-4.8.0.2856-linux.zip
+        # Download latest SonarQube Scanner (Java 21 uyumlu)
+        wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
+        unzip -q sonar-scanner-cli-6.2.1.4610-linux-x64.zip
         
-        # Force SonarQube Scanner to use Java 17
-        export SONAR_SCANNER_OPTS="-Djava.home=/usr/lib/jvm/java-17-openjdk-amd64"
-        
-        # Run analysis
-        JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
-        ./sonar-scanner-4.8.0.2856-linux/bin/sonar-scanner \
+        # Run SonarQube analysis with Java 21
+        JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 \
+        ./sonar-scanner-6.2.1.4610-linux-x64/bin/sonar-scanner \
           -Dsonar.projectKey=auth-service \
+          -Dsonar.projectName="Authentication Service" \
           -Dsonar.sources=. \
           -Dsonar.exclusions="tests/**,**/__pycache__/**" \
           -Dsonar.host.url=http://sonarqube:9000 \
           -Dsonar.login=admin \
           -Dsonar.password=admin \
           -Dsonar.python.coverage.reportPaths=coverage.xml
+        
+        echo "✅ SonarQube analysis completed!"
     
     - name: Build Docker Image
       run: |
