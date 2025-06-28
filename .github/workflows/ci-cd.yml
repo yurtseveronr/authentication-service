@@ -6,7 +6,7 @@ on:
 
 jobs:
   pipeline:
-    runs-on: [self-hosted, kubernetes, devops]
+    runs-on: [self-hosted]
     
     steps:
     - name: Checkout
@@ -56,6 +56,20 @@ jobs:
         java -version
         echo "JAVA_HOME: $JAVA_HOME"
         
+        # SonarQube'da token oluştur
+        echo "Creating SonarQube token..."
+        TOKEN=$(curl -u admin:admin -X POST \
+          "http://sonarqube:9000/api/user_tokens/generate" \
+          -d "name=pipeline-token-$(date +%s)" | \
+          python3 -c "import sys, json; print(json.load(sys.stdin)['token'])" 2>/dev/null || echo "")
+        
+        if [ -z "$TOKEN" ]; then
+          echo "Failed to create token, trying existing token..."
+          TOKEN="admin"
+        fi
+        
+        echo "Using token: ${TOKEN:0:10}..."
+        
         # Download latest SonarQube Scanner (Java 21 uyumlu)
         wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
         unzip -q sonar-scanner-cli-6.2.1.4610-linux-x64.zip
@@ -68,8 +82,7 @@ jobs:
           -Dsonar.sources=. \
           -Dsonar.exclusions="tests/**,**/__pycache__/**" \
           -Dsonar.host.url=http://sonarqube:9000 \
-          -Dsonar.login=admin \
-          -Dsonar.password=admin \
+          -Dsonar.token="$TOKEN" \
           -Dsonar.python.coverage.reportPaths=coverage.xml
         
         echo "✅ SonarQube analysis completed!"
