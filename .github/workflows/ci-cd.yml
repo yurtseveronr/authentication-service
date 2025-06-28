@@ -6,7 +6,7 @@ on:
 
 jobs:
   pipeline:
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, kubernetes, devops]
     
     steps:
     - name: Checkout
