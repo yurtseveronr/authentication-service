@@ -1,0 +1,85 @@
+name: CI/CD Pipeline
+
+on:
+ push:
+   branches: [ main, develop ]
+ pull_request:
+   branches: [ main ]
+
+jobs:
+ ci-cd:
+   runs-on: [self-hosted, kubernetes, devops]
+   
+   steps:
+   - name: Checkout Code
+     uses: actions/checkout@v4
+   
+   # 1. Unit Tests
+   - name: Unit Tests
+     run: |
+       cd codebase
+       pip install -r requirements.txt
+       python -m pytest tests/ -v
+   
+   # 2. Code Coverage
+   - name: Code Coverage
+     run: |
+       cd codebase
+       pip install pytest-cov
+       python -m pytest tests/ \
+         --cov=app \
+         --cov-report=xml \
+         --cov-report=term \
+         --cov-fail-under=50
+   
+   # 3. Static Code Analysis (SonarQube)
+   - name: SonarQube Analysis
+     run: |
+       cd codebase
+       wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip
+       unzip -q sonar-scanner-cli-4.8.0.2856-linux.zip
+       ./sonar-scanner-4.8.0.2856-linux/bin/sonar-scanner \
+         -Dsonar.projectKey=auth-service \
+         -Dsonar.projectName="Authentication Service" \
+         -Dsonar.sources=. \
+         -Dsonar.exclusions="tests/**,**/__pycache__/**" \
+         -Dsonar.host.url=http://sonarqube:9000 \
+         -Dsonar.login=admin \
+         -Dsonar.password=admin \
+         -Dsonar.python.coverage.reportPaths=coverage.xml
+   
+   # 4. Build Docker Image
+   - name: Build Docker Image
+     run: |
+       cd codebase
+       docker build -t auth-service:${{ github.sha }} .
+   
+   # 5. Container Security Scan (Trivy)
+   - name: Container Security Scan
+     run: |
+       trivy image \
+         --server http://trivy-server:4954 \
+         --severity HIGH,CRITICAL \
+         --exit-code 1 \
+         auth-service:${{ github.sha }}
+   
+   # 6. Load Test (Locust)
+   - name: Load Test
+     run: |
+       echo "🚀 Starting Load Test with Locust..."
+       curl -X POST http://locust-master:8089/swarm \
+         -d "user_count=10&spawn_rate=2&host=http://auth-service:5000"
+       sleep 30
+       curl -X GET http://locust-master:8089/stop
+       echo "✅ Load Test Completed"
+   
+   # 7. Push to ECR
+   - name: Push to ECR
+     run: |
+       cd codebase
+       aws ecr get-login-password --region us-east-1 | \
+         docker login --username AWS --password-stdin \
+         ${{ secrets.ECR_REGISTRY }}
+       docker tag auth-service:${{ github.sha }} \
+         ${{ secrets.ECR_REGISTRY }}/auth-service:${{ github.sha }}
+       docker push ${{ secrets.ECR_REGISTRY }}/auth-service:${{ github.sha }}
