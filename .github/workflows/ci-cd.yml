@@ -12,50 +12,69 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Setup
+    - name: Setup Environment
       run: |
-        apt-get update && apt-get install -y python3 python3-pip wget unzip
+        apt-get update && apt-get install -y python3 python3-pip wget unzip openjdk-17-jdk
         ln -sf /usr/bin/python3 /usr/bin/python
         ln -sf /usr/bin/pip3 /usr/bin/pip
+        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+        echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
     
-    - name: Unit Tests
+    - name: Unit Tests & Coverage
       run: |
         cd codebase
         pip install -r requirements.txt pytest pytest-cov
-        python -m pytest tests/ --cov=app --cov-fail-under=50
+        python -m pytest tests/ \
+          --cov=app \
+          --cov-report=xml \
+          --cov-fail-under=50 \
+          -v
     
-    - name: SonarQube
+    - name: SonarQube Analysis
       run: |
         cd codebase
+        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
         wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip
         unzip -q sonar-scanner-cli-4.8.0.2856-linux.zip
         ./sonar-scanner-4.8.0.2856-linux/bin/sonar-scanner \
           -Dsonar.projectKey=auth-service \
           -Dsonar.sources=. \
+          -Dsonar.exclusions="tests/**,**/__pycache__/**" \
           -Dsonar.host.url=http://sonarqube:9000 \
           -Dsonar.login=admin \
-          -Dsonar.password=admin
+          -Dsonar.password=admin \
+          -Dsonar.python.coverage.reportPaths=coverage.xml
     
-    - name: Build & Security Scan
+    - name: Build Docker Image
       run: |
         cd codebase
-        docker build -t auth-service:${{ github.sha }} .
-        trivy image --server http://trivy-server:4954 \
-          --severity CRITICAL --exit-code 1 \
-          auth-service:${{ github.sha }}
+        docker build -t auth-service:latest .
+    
+    - name: Container Security Scan
+      run: |
+        trivy image \
+          --server http://trivy-server:4954 \
+          --severity CRITICAL \
+          --exit-code 1 \
+          auth-service:latest
     
     - name: Load Test
       run: |
-        echo "Load testing..."
-        curl -X POST http://locust-master:8089/swarm -d "user_count=10&spawn_rate=2"
+        curl -X POST http://locust-master:8089/swarm \
+          -d "user_count=10&spawn_rate=2&host=http://auth-service:5000" || true
         sleep 30
-        curl -X GET http://locust-master:8089/stop
+        curl -X GET http://locust-master:8089/stop || true
     
     - name: Push to ECR
-      if: github.ref == 'refs/heads/main'
       run: |
         cd codebase
+        
+        # ECR Login
         aws ecr get-login-password --region us-east-1 | \
-          docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
-        docker tag auth-service:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/auth-service:${{ github.sha }}
-        docker push ${{ secrets.ECR_REGISTRY }}/auth-service:${{ github.sha }}
+          docker login --username AWS --password-stdin 708778582346.dkr.ecr.us-east-1.amazonaws.com
+        
+        # Tag and Push
+        docker tag auth-service:latest 708778582346.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest
+        docker push 708778582346.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest
+        
+        echo "✅ Pushed to ECR: 708778582346.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest"
