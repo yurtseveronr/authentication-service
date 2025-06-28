@@ -14,25 +14,35 @@ jobs:
     
     - name: Setup Environment
       run: |
-        apt-get update && apt-get install -y python3 python3-pip wget unzip
+        apt-get update && apt-get install -y \
+          python3 python3-pip \
+          wget unzip curl \
+          docker.io \
+          openjdk-21-jdk
+        
         ln -sf /usr/bin/python3 /usr/bin/python
         ln -sf /usr/bin/pip3 /usr/bin/pip
         
-        # Remove all existing Java versions
-        apt-get remove -y --purge openjdk-* || true
-        apt-get autoremove -y || true
-        
-        # Install Java 21 (SonarQube server ile aynı)
-        apt-get install -y openjdk-21-jdk
+        # Remove conflicting Java versions
+        apt-get remove -y --purge openjdk-8-* openjdk-11-* openjdk-17-* || true
         
         # Set Java 21
         export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
         echo "JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64" >> $GITHUB_ENV
         echo "/usr/lib/jvm/java-21-openjdk-amd64/bin" >> $GITHUB_PATH
         
-        # Verify Java
+        # Start Docker service
+        service docker start || true
+        
+        # Verify installations
+        echo "=== CLI Versions ==="
+        python --version
+        pip --version
         java -version
-        which java
+        docker --version
+        wget --version | head -1
+        curl --version | head -1
+        echo "===================="
     
     - name: Unit Tests & Coverage
       run: |
