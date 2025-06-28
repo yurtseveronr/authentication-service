@@ -31,8 +31,12 @@ jobs:
         echo "JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64" >> $GITHUB_ENV
         echo "/usr/lib/jvm/java-21-openjdk-amd64/bin" >> $GITHUB_PATH
         
-        # Start Docker service
+        # Start Docker service ve permissions fix
         service docker start || true
+        chmod 666 /var/run/docker.sock || true
+        
+        # Test Docker
+        docker ps || echo "Docker connection test failed, continuing..."
         
         # Verify installations
         echo "=== CLI Versions ==="
