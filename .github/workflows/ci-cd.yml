@@ -19,12 +19,17 @@ jobs:
           wget unzip curl \
           docker.io \
           openjdk-21-jdk
+
+
+         
         
         ln -sf /usr/bin/python3 /usr/bin/python
         ln -sf /usr/bin/pip3 /usr/bin/pip
         
         # Remove conflicting Java versions
         apt-get remove -y --purge openjdk-8-* openjdk-11-* openjdk-17-* || true
+
+        
         
         # Set Java 21
         export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
@@ -37,6 +42,11 @@ jobs:
         
         # Test Docker
         docker ps || echo "Docker connection test failed, continuing..."
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add -
+        echo "deb https://aquasecurity.github.io/trivy-repo/deb generic main" | tee -a /etc/apt/sources.list.d/trivy.list
+        apt-get update && apt-get install -y trivy
+
+        
         
         # Verify installations
         echo "=== CLI Versions ==="
