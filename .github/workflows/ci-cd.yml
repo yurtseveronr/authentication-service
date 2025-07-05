@@ -19,39 +19,35 @@ jobs:
           wget unzip curl \
           docker.io \
           openjdk-21-jdk
-
-
-         
         
         ln -sf /usr/bin/python3 /usr/bin/python
         ln -sf /usr/bin/pip3 /usr/bin/pip
         
+        # Docker DinD service'e bağlan
+        export DOCKER_HOST=tcp://docker-dind:2376
+        echo "DOCKER_HOST=tcp://docker-dind:2376" >> $GITHUB_ENV
+        
         # Remove conflicting Java versions
         apt-get remove -y --purge openjdk-8-* openjdk-11-* openjdk-17-* || true
-
-        
         
         # Set Java 21
         export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
         echo "JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64" >> $GITHUB_ENV
         echo "/usr/lib/jvm/java-21-openjdk-amd64/bin" >> $GITHUB_PATH
         
-        # Start Docker service ve permissions fix
-        service docker start || true
-        chmod 666 /var/run/docker.sock || true
+        # Docker daemon ready kontrolü
+        echo "Waiting for Docker daemon..."
+        for i in {1..30}; do
+          if docker info >/dev/null 2>&1; then
+            echo "Docker daemon is ready!"
+            break
+          fi
+          echo "Waiting for Docker daemon... ($i/30)"
+          sleep 3
+        done
         
         # Test Docker
-        docker ps || echo "Docker connection test failed, continuing..."
-        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add -
-        echo "deb https://aquasecurity.github.io/trivy-repo/deb generic main" | tee -a /etc/apt/sources.list.d/trivy.list
-        apt-get update && apt-get install -y trivy
-
-
-        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-        unzip awscliv2.zip
-        ./aws/install --update
-
-        
+        docker ps
         
         # Verify installations
         echo "=== CLI Versions ==="
@@ -119,18 +115,24 @@ jobs:
     - name: Build Docker Image
       run: |
         cd codebase
+        
+        # DinD servisini kullan
+        export DOCKER_HOST=tcp://docker-dind:2376
+        
+        # Docker build
         docker build -t auth-service:latest .
+        
+        # Image kontrolü
+        docker images | grep auth-service
     
     - name: Container Security Scan
       run: |
-        echo "🔍 Running Trivy security scan..."
+        export DOCKER_HOST=tcp://docker-dind:2376
         trivy image \
           --server http://trivy-server:4954 \
           --severity CRITICAL \
-          --exit-code 0 \
-          auth-service:latest || echo "⚠️ CRITICAL vulnerabilities found but continuing..."
-
-          echo "✅ Security scan completed (with warnings if any)"
+          --exit-code 1 \
+          auth-service:latest
     
     - name: Load Test
       run: |
@@ -143,6 +145,8 @@ jobs:
       run: |
         cd codebase
         
+        export DOCKER_HOST=tcp://docker-dind:2376
+        
         # ECR Login
         aws ecr get-login-password --region us-east-1 | \
           docker login --username AWS --password-stdin 708778582346.dkr.ecr.us-east-1.amazonaws.com
@@ -151,4 +155,25 @@ jobs:
         docker tag auth-service:latest 708778582346.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest
         docker push 708778582346.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest
         
-        echo "✅ Pushed to ECR: 708778582346.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest"
+    - name: Deploy to Kubernetes
+      run: |
+        cd codebase
+        
+        # Install kubectl
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        sudo mv kubectl /usr/local/bin/
+        
+        # Configure kubectl for EKS
+        aws eks update-kubeconfig --region us-east-1 --name onur-master-eks
+        
+        # Update deployment with new image
+        kubectl set image deployment/auth-service auth-service=708778582346.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest -n authentication
+        
+        # Wait for rollout
+        kubectl rollout status deployment/auth-service -n authentication --timeout=300s
+        
+        # Verify deployment
+        kubectl get pods -n authentication
+        
+        echo "✅ Deployed to Kubernetes successfully!"
